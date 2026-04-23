@@ -7,9 +7,9 @@ pub fn main() void {
 
     const allocator = arena.allocator();
 
-    const tokens = lexer.tokenize(allocator, "+-/*");
+    const tokens = lexer.tokenize(allocator, "let cold ++--=/*==");
 
-    std.debug.print("{any}", .{tokens});
+    std.debug.print("{any}\n", .{tokens});
 }
 
 
