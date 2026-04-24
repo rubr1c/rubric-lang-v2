@@ -7,7 +7,7 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    var tokenizer: lexer.Tokenizer = try .init(allocator, "let cold : int32 ++/*=--==");
+    var tokenizer: lexer.Tokenizer = try .init(allocator, "let cold : int32 = 20;");
     try tokenizer.build();
 
     std.debug.print("{any}\n", .{tokenizer.tokens.items});

@@ -6,8 +6,9 @@ const Token = union(enum) {
     assignment: void,
 
     // types
-    integer32: i32,
-    integer32_id: void, 
+    int: i64,
+    float: f64,
+    integer32_id: void,
 
     // ops
     add: void,
@@ -20,6 +21,7 @@ const Token = union(enum) {
     comparison: void,
 
     colon: void,
+    semicolon: void,
 
     // misc
     EOF: void,
@@ -27,9 +29,10 @@ const Token = union(enum) {
 
 const LexerError = error{
     Expected,
+    InvalidNum,
 };
 
-const IDENTIFIER = "let";
+const INITALIZER = "let";
 const I32_ID = "int32";
 
 pub const Tokenizer = struct {
@@ -59,10 +62,10 @@ pub const Tokenizer = struct {
         return self.tokens.append(self.allocator, token);
     }
 
-    pub inline fn next_tok(self: *Tokenizer) !bool {
+    pub inline fn next_tok(self: *Tokenizer) !?void {
         self.skip_space();
 
-        if (self.empty()) return false;
+        if (self.empty()) return null;
 
         const first = self.src[self.pos];
 
@@ -72,103 +75,117 @@ pub const Tokenizer = struct {
                     if (next == '+') {
                         self.pos += 2;
                         try self.add_tok(.increment);
-                        return true;
+                        return;
                     }
                 }
                 self.pos += 1;
                 try self.add_tok(.add);
-                return true;
             },
             '-' => {
                 if (self.peek(1)) |next| {
                     if (next == '-') {
                         self.pos += 2;
                         try self.add_tok(.decrement);
-                        return true;
+                        return;
                     }
                 }
                 self.pos += 1;
                 try self.add_tok(.sub);
-                return true;
             },
             '*' => {
                 self.pos += 1;
                 try self.add_tok(.mul);
-                return true;
             },
             '/' => {
                 self.pos += 1;
                 try self.add_tok(.div);
-                return true;
             },
             '=' => {
                 if (self.peek(1)) |next| {
                     if (next == '=') {
                         self.pos += 2;
                         try self.add_tok(.comparison);
-                        return true;
+                        return;
                     }
                 }
                 self.pos += 1;
                 try self.add_tok(.assignment);
-                return true;
             },
-            else => self.lex_id(),
+            ':' => {
+                self.pos += 1;
+                try self.add_tok(.colon);
+            },
+            ';' => {
+                self.pos += 1;
+                try self.add_tok(.semicolon);
+            },
+            else => {
+                try self.lex_id();
+            },
         };
     }
 
-    // very messy just testin
-    inline fn lex_id(self: *Tokenizer) !bool {
-        if (std.mem.startsWith(u8, self.src[self.pos..], IDENTIFIER)) {
-            const next = self.peek(IDENTIFIER.len);
-            if (next == null or std.ascii.isWhitespace(next.?)) {
-                self.pos += IDENTIFIER.len;
-                try self.add_tok(.initalizer);
-                self.skip_space();
-
-                if (self.empty()) return LexerError.Expected;
-
-                var buff = try std.ArrayList(u8).initCapacity(self.allocator, 256);
-
-                while (!self.empty() and 
-                         self.src[self.pos] != ' ' and self.src[self.pos] != ':')
-                 {
-                    try buff.append(self.allocator, self.src[self.pos]);
-                    self.pos += 1;
-                }
-
-                if (buff.items.len == 0) return LexerError.Expected;
-
-                try self.add_tok(.{ .identifier = try buff.toOwnedSlice(self.allocator) });
-                
-                if (self.empty()) return true;
-
-                self.skip_space();
-
-                if (self.src[self.pos] == ':') {
-                    try self.add_tok(.colon);
-                    self.pos += 1;
-
-                    self.skip_space();
-
-                    var t_buff = try std.ArrayList(u8).initCapacity(self.allocator, 256);
-                    var count: usize = 0;
-                    while (self.pos + count < self.src.len and self.src[self.pos + count] != ' ') {
-                        try t_buff.append(self.allocator, self.src[self.pos + count]);
-                        count += 1;
-                    }
-
-                    if (std.mem.eql(u8, t_buff.items, I32_ID)) {
-                        try self.add_tok(.integer32_id);
-                        self.pos += count;
-                    }
-                }
-
-                return true;
+    inline fn lex_id(self: *Tokenizer) !void {
+        var buff = try std.ArrayList(u8).initCapacity(self.allocator, 256);
+        if (std.mem.startsWith(u8, self.src[self.pos..], INITALIZER)) {
+           try self.read_lex_id(INITALIZER, .initalizer); 
+        } else if (std.mem.startsWith(u8, self.src[self.pos..], I32_ID)) {
+            try self.read_lex_id(I32_ID, .integer32_id);
+        } else if (std.ascii.isDigit(self.src[self.pos])) {
+            const is_float = try self.read_num(&buff);
+            if (is_float) {
+                try self.add_tok(
+                    .{ .float = try std.fmt.parseFloat(
+                        f64, try buff.toOwnedSlice(self.allocator)
+                    ) }
+                );
+            } else {
+                try self.add_tok(
+                    .{ .int = try std.fmt.parseInt(
+                        i64, try buff.toOwnedSlice(self.allocator), 10
+                    ) }
+                );
             }
+        } else {
+            try self.read_id(&buff);
+            try self.add_tok(.{ .identifier = try buff.toOwnedSlice(self.allocator) });
+        }
+    }
+
+    // returns true if float
+    inline fn read_num(self: *Tokenizer, buff: *std.ArrayList(u8)) !bool {
+        var is_float = false;
+        while (!self.empty() and (
+                std.ascii.isDigit(self.src[self.pos]) or self.src[self.pos] == '.')
+        ) {
+            const has_point = self.src[self.pos] == '.';
+            if (is_float and has_point) return LexerError.InvalidNum;
+            if (has_point) is_float = true; 
+
+            try buff.append(self.allocator, self.src[self.pos]);
+            self.pos += 1;
         }
 
-        return false;
+        return is_float;
+    }
+
+    inline fn read_lex_id(self: *Tokenizer, id: []const u8, tok: Token) !void {
+        const next = self.peek(id.len);
+        if (next == null or std.ascii.isWhitespace(next.?)) {
+            self.pos += id.len;
+            try self.add_tok(tok);
+        }
+    }
+
+    inline fn read_id(self: *Tokenizer, buff: *std.ArrayList(u8)) !void {
+        while (!self.empty() and
+            !std.ascii.isWhitespace(self.src[self.pos]))
+        {
+            try buff.append(self.allocator, self.src[self.pos]);
+            self.pos += 1;
+        }
+
+        if (buff.items.len == 0) return LexerError.Expected;
     }
 
     inline fn skip_space(self: *Tokenizer) void {
@@ -180,7 +197,7 @@ pub const Tokenizer = struct {
     }
 
     pub fn build(self: *Tokenizer) !void {
-        while (try self.next_tok()) {}
+        while ((try self.next_tok()) != null) {}
         try self.tokens.append(self.allocator, .EOF);
     }
 };
