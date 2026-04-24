@@ -140,9 +140,7 @@ pub const Tokenizer = struct {
             } else {
                 try self.add_tok(.{ .int = try std.fmt.parseInt(i64, try buff.toOwnedSlice(self.allocator), 10) });
             }
-            // self.read_id() is called twice and should be optimized.
         } else if ((try self.read_num_id(&buff)) != null) {} else {
-            try self.read_id(&buff);
             try self.add_tok(.{ .identifier = try buff.toOwnedSlice(self.allocator) });
         }
     }
