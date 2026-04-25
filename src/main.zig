@@ -7,10 +7,9 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    // many issues with needing whitespace that needed to be fixed.
     var tokenizer: lexer.Tokenizer = try .init(
         allocator, 
-        "let x : struct = { x : int32 };"
+        "let c_char:byte='c';"
     );
     try tokenizer.build();
 

@@ -302,7 +302,7 @@ pub const Tokenizer = struct {
             },
             '|' => {
                 const next = self.peek(1);
-                if (next == '=') {
+                if (next == '|') {
                     self.pos += 2;
                     try self.add_tok(._or);
                 } else {
@@ -365,13 +365,10 @@ pub const Tokenizer = struct {
             try self.read_str(&buff);
             try self.add_tok(.{ .string = try buff.toOwnedSlice(self.allocator) });
         } else if (self.src[self.pos] == '\'') {
-            try self.read_str(&buff);
-            if (buff.items.len > 1) {
-                // should not be allowed should check in parser prob.
-                try self.add_tok(.{ .string = try buff.toOwnedSlice(self.allocator) });
-            } else {
-                try self.add_tok(.{ .byte = buff.items[0] });
-            }
+            const end = self.peek(2);  
+            if (end != '\'') return LexerError.Expected;
+            try self.add_tok(.{ .byte = self.src[self.pos + 1] });
+            self.pos += 3;
         } else if ((try self.read_type_id(&buff)) != null) {} else {
             try self.add_tok(.{ .identifier = try buff.toOwnedSlice(self.allocator) });
         }
@@ -390,13 +387,13 @@ pub const Tokenizer = struct {
         } else if (std.mem.startsWith(u8, buff.items, FLOAT_ID)) {
             start = FLOAT_ID.len;
             is_float = true;
-        } else if (std.mem.startsWith(u8, buff.items, BYTE_ID)) {
+        } else if (std.mem.eql(u8, buff.items, BYTE_ID)) {
             try self.add_tok(.byte_id);
             return;
-        } else if (std.mem.startsWith(u8, buff.items, STRING_ID)) {
+        } else if (std.mem.eql(u8, buff.items, STRING_ID)) {
             try self.add_tok(.string_id);
             return;
-        } else if (std.mem.startsWith(u8, buff.items, BOOL_ID)) {
+        } else if (std.mem.eql(u8, buff.items, BOOL_ID)) {
             try self.add_tok(.bool_id);
             return;
         } else {
@@ -405,9 +402,9 @@ pub const Tokenizer = struct {
 
         const size = buff.items[start..];
 
-        if (std.mem.startsWith(u8, size, "32")) {
+        if (std.mem.eql(u8, size, "32")) {
             try self.add_tok(if (is_float) .float32_id else .integer32_id);
-        } else if (std.mem.startsWith(u8, size, "64")) {
+        } else if (std.mem.eql(u8, size, "64")) {
             try self.add_tok(if (is_float) .float64_id else .integer64_id);
         } else {
             return null;
@@ -430,11 +427,12 @@ pub const Tokenizer = struct {
     }
 
     // assumes current is "
-    // works with single and double even when strings should only be in ""
-    // but will be used for chars and will be validated in parser.
-    inline fn read_str(self: *Tokenizer, buff: *std.ArrayList(u8)) !void {
+    inline fn read_str(
+        self: *Tokenizer, 
+        buff: *std.ArrayList(u8)
+    ) !void {
         self.pos += 1;
-        while (self.src[self.pos] != '\"' and self.src[self.pos] != '\'') {
+        while (self.src[self.pos] != '\"') {
             try buff.append(self.allocator, self.src[self.pos]);
             self.pos += 1;
         }
@@ -443,16 +441,17 @@ pub const Tokenizer = struct {
 
     inline fn read_lex_id(self: *Tokenizer, id: []const u8, tok: Token) !void {
         const next = self.peek(id.len);
-        if (next == null or std.ascii.isWhitespace(next.?)) {
+        if (next == null or !std.ascii.isAlphanumeric(next.?)) {
             self.pos += id.len;
             try self.add_tok(tok);
         }
     }
 
     inline fn read_id(self: *Tokenizer, buff: *std.ArrayList(u8)) !void {
-        while (!self.empty() and
-            !std.ascii.isWhitespace(self.src[self.pos]))
-        {
+        while (!self.empty() and (
+                std.ascii.isAlphanumeric(self.src[self.pos]) or 
+                self.src[self.pos] == '_')
+        ) {
             try buff.append(self.allocator, self.src[self.pos]);
             self.pos += 1;
         }
@@ -473,3 +472,192 @@ pub const Tokenizer = struct {
         try self.tokens.append(self.allocator, .EOF);
     }
 };
+
+const TokenTag = std.meta.Tag(Token);
+
+fn expectTokenTags(src: []const u8, expected: []const TokenTag) !void {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var tokenizer = try Tokenizer.init(arena.allocator(), src);
+    try tokenizer.build();
+
+    try std.testing.expectEqual(expected.len + 1, tokenizer.tokens.items.len);
+    for (expected, 0..) |tag, idx| {
+        try std.testing.expectEqual(tag, std.meta.activeTag(tokenizer.tokens.items[idx]));
+    }
+    try std.testing.expectEqual(TokenTag.EOF, std.meta.activeTag(tokenizer.tokens.items[expected.len]));
+}
+
+test "lexes all keywords" {
+    const expected = [_]TokenTag{
+        .initalizer,
+        .const_initalizer,
+        .keyword_if,
+        .keyword_else,
+        .keyword_while,
+        .keyword_for,
+        .keyword_return,
+        .keyword_fn,
+        .keyword_struct,
+    };
+
+    try expectTokenTags("let const if else while for ret fn struct", &expected);
+}
+
+test "skips spaces and newlines in declarations" {
+    const src =
+        "  \n" ++
+        "let   total : int32 = 1 ;\n" ++
+        "const  ready:bool = false ;\n" ++
+        "ret total ;";
+
+    const expected = [_]TokenTag{
+        .initalizer,
+        .identifier,
+        .colon,
+        .integer32_id,
+        .eql,
+        .int,
+        .semicolon,
+        .const_initalizer,
+        .identifier,
+        .colon,
+        .bool_id,
+        .eql,
+        .boolean,
+        .semicolon,
+        .keyword_return,
+        .identifier,
+        .semicolon,
+    };
+
+    try expectTokenTags(src, &expected);
+}
+
+test "lexes literal payload values" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var tokenizer = try Tokenizer.init(arena.allocator(), "'a' 42 3.5 \"hello\" true false;");
+    try tokenizer.build();
+
+    try std.testing.expectEqual(@as(usize, 8), tokenizer.tokens.items.len);
+    try std.testing.expectEqual(TokenTag.byte, std.meta.activeTag(tokenizer.tokens.items[0]));
+    try std.testing.expectEqual(@as(u8, 'a'), tokenizer.tokens.items[0].byte);
+
+    try std.testing.expectEqual(TokenTag.int, std.meta.activeTag(tokenizer.tokens.items[1]));
+    try std.testing.expectEqual(@as(i64, 42), tokenizer.tokens.items[1].int);
+
+    try std.testing.expectEqual(TokenTag.float, std.meta.activeTag(tokenizer.tokens.items[2]));
+    try std.testing.expectApproxEqAbs(@as(f64, 3.5), tokenizer.tokens.items[2].float, 0.000001);
+
+    try std.testing.expectEqual(TokenTag.string, std.meta.activeTag(tokenizer.tokens.items[3]));
+    try std.testing.expectEqualStrings("hello", tokenizer.tokens.items[3].string);
+
+    try std.testing.expectEqual(TokenTag.boolean, std.meta.activeTag(tokenizer.tokens.items[4]));
+    try std.testing.expectEqual(true, tokenizer.tokens.items[4].boolean);
+
+    try std.testing.expectEqual(TokenTag.boolean, std.meta.activeTag(tokenizer.tokens.items[5]));
+    try std.testing.expectEqual(false, tokenizer.tokens.items[5].boolean);
+
+    try std.testing.expectEqual(TokenTag.semicolon, std.meta.activeTag(tokenizer.tokens.items[6]));
+    try std.testing.expectEqual(TokenTag.EOF, std.meta.activeTag(tokenizer.tokens.items[7]));
+}
+
+test "lexes all builtin type ids" {
+    const expected = [_]TokenTag{
+        .byte_id,
+        .string_id,
+        .bool_id,
+        .integer32_id,
+        .integer64_id,
+        .float32_id,
+        .float64_id,
+    };
+
+    try expectTokenTags("byte str bool int32 int64 float32 float64", &expected);
+}
+
+test "lexes operators and punctuation" {
+    const src = "+ += ++ - -= -- * *= / /= % %= = == ! != > >= >> < <= << & && | ^ ~ ? @ . , : ; ( ) [ ] { }";
+    const expected = [_]TokenTag{
+        .add,
+        .add_eql,
+        .increment,
+        .sub,
+        .sub_eql,
+        .decrement,
+        .mul,
+        .mul_eql,
+        .div,
+        .div_eql,
+        .modulo,
+        .modulo_eql,
+        .eql,
+        .eql_eql,
+        .not,
+        .not_eql,
+        .greater,
+        .greater_eql,
+        .shift_right,
+        .less,
+        .less_eql,
+        .shift_left,
+        .bitwise_and,
+        ._and,
+        .bitwise_or,
+        .bitwise_xor,
+        .bitwise_not,
+        .question,
+        .at,
+        .dot,
+        .comma,
+        .colon,
+        .semicolon,
+        .paren_o,
+        .paren_c,
+        .sq_brace_o,
+        .sq_brace_c,
+        .cu_brace_o,
+        .cu_brace_c,
+    };
+
+    try expectTokenTags(src, &expected);
+}
+
+test "lexes logical or with double pipe" {
+    const expected = [_]TokenTag{
+        .identifier,
+        ._or,
+        .identifier,
+    };
+
+    try expectTokenTags("a || b", &expected);
+}
+
+test "does not treat type prefixes as full type ids" {
+    const expected = [_]TokenTag{
+        .identifier,
+        .identifier,
+        .identifier,
+    };
+
+    try expectTokenTags("int32x boolish strname", &expected);
+}
+
+test "returns InvalidNum for malformed float" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var tokenizer = try Tokenizer.init(arena.allocator(), "1.2.3");
+    try std.testing.expectError(LexerError.InvalidNum, tokenizer.build());
+}
+
+test "returns Expected for malformed byte literal" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var tokenizer = try Tokenizer.init(arena.allocator(), "'ab'");
+    try std.testing.expectError(LexerError.Expected, tokenizer.build());
+}
