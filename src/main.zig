@@ -7,8 +7,11 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    // colon for types have to have a space before the id prob should fix.
-    var tokenizer: lexer.Tokenizer = try .init(allocator, "let cold : bool = false;");
+    // many issues with needing whitespace that needed to be fixed.
+    var tokenizer: lexer.Tokenizer = try .init(
+        allocator, 
+        "let x : struct = { x : int32 };"
+    );
     try tokenizer.build();
 
     std.debug.print("{any}\n", .{tokenizer.tokens.items});

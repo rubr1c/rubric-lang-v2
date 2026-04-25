@@ -6,6 +6,14 @@ const Token = union(enum) {
 
     // keywords
     initalizer: void,
+    const_initalizer: void,
+    keyword_if: void,
+    keyword_else: void,
+    keyword_while: void,
+    keyword_for: void,
+    keyword_return: void,
+    keyword_fn: void,
+    keyword_struct: void,
 
     // lits
     byte: u8,
@@ -30,6 +38,18 @@ const Token = union(enum) {
     div: void,
     modulo: void,
 
+    not: void,
+    // _ for taken keywords
+    _and: void,
+    _or: void,
+
+    bitwise_and: void,
+    bitwise_or: void,
+    bitwise_xor: void,
+    bitwise_not: void,
+    shift_left: void,
+    shift_right: void,
+
     // assignment and compound
     eql: void,
     add_eql: void,
@@ -42,7 +62,6 @@ const Token = union(enum) {
 
     // comparison ops
     eql_eql: void,
-    not: void,
     not_eql: void,
     greater: void,
     less: void,
@@ -72,6 +91,14 @@ const LexerError = error{
 };
 
 const INITALIZER = "let";
+const CONST_INITALIZER = "const";
+const IF_KEYWORD = "if";
+const ELSE_KEYWORD = "else";
+const FN_KEYWORD = "fn";
+const WHILE_KEYWORD = "while";
+const FOR_KEYWORD = "for";
+const RETURN_KEYWORD = "ret";
+const STRUCT_KEYWORD = "struct";
 const INT_ID = "int";
 const FLOAT_ID = "float";
 const BYTE_ID = "byte";
@@ -232,6 +259,9 @@ pub const Tokenizer = struct {
                 if (next == '=') {
                     self.pos += 2;
                     try self.add_tok(.greater_eql);
+                } else if (next == '>') {
+                    self.pos += 2;
+                    try self.add_tok(.shift_right);
                 } else {
                     self.pos += 1;
                     try self.add_tok(.greater);
@@ -242,6 +272,9 @@ pub const Tokenizer = struct {
                 if (next == '=') {
                     self.pos += 2;
                     try self.add_tok(.less_eql);
+                } else if (next == '<') {
+                    self.pos += 2;
+                    try self.add_tok(.shift_left);
                 } else {
                     self.pos += 1;
                     try self.add_tok(.less);
@@ -257,6 +290,34 @@ pub const Tokenizer = struct {
                     try self.add_tok(.modulo);
                 }
             },
+            '&' => {
+                const next = self.peek(1);
+                if (next == '&') {
+                    self.pos += 2;
+                    try self.add_tok(._and);
+                } else {
+                    self.pos += 1;
+                    try self.add_tok(.bitwise_and);
+                }
+            },
+            '|' => {
+                const next = self.peek(1);
+                if (next == '=') {
+                    self.pos += 2;
+                    try self.add_tok(._or);
+                } else {
+                    self.pos += 1;
+                    try self.add_tok(.bitwise_or);
+                }
+            },
+            '^' => {
+               self.pos += 1; 
+               try self.add_tok(.bitwise_xor);
+            },
+           '~' => {
+               self.pos += 1;
+                try self.add_tok(.bitwise_not);
+           },
             else => {
                 try self.lex_id();
             },
@@ -267,6 +328,22 @@ pub const Tokenizer = struct {
         var buff = try std.ArrayList(u8).initCapacity(self.allocator, 256);
         if (std.mem.startsWith(u8, self.src[self.pos..], INITALIZER)) {
             try self.read_lex_id(INITALIZER, .initalizer);
+        } else if (std.mem.startsWith(u8, self.src[self.pos..], CONST_INITALIZER)) {
+            try self.read_lex_id(CONST_INITALIZER, .const_initalizer);
+        } else if (std.mem.startsWith(u8, self.src[self.pos..], IF_KEYWORD)) {
+            try self.read_lex_id(IF_KEYWORD, .keyword_if);
+        } else if (std.mem.startsWith(u8, self.src[self.pos..], ELSE_KEYWORD)) {
+            try self.read_lex_id(ELSE_KEYWORD, .keyword_else);
+        } else if (std.mem.startsWith(u8, self.src[self.pos..], FN_KEYWORD)) {
+            try self.read_lex_id(FN_KEYWORD, .keyword_fn);
+        } else if (std.mem.startsWith(u8, self.src[self.pos..], WHILE_KEYWORD)) {
+            try self.read_lex_id(WHILE_KEYWORD, .keyword_while);
+        } else if (std.mem.startsWith(u8, self.src[self.pos..], FOR_KEYWORD)) {
+            try self.read_lex_id(FOR_KEYWORD, .keyword_for);
+        } else if (std.mem.startsWith(u8, self.src[self.pos..], RETURN_KEYWORD)) {
+            try self.read_lex_id(RETURN_KEYWORD, .keyword_return);
+        } else if (std.mem.startsWith(u8, self.src[self.pos..], STRUCT_KEYWORD)) {
+            try self.read_lex_id(STRUCT_KEYWORD, .keyword_struct);
         } else if (std.ascii.isDigit(self.src[self.pos])) {
             const is_float = try self.read_num(&buff);
             if (is_float) {
