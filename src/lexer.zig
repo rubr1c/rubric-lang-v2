@@ -1,33 +1,69 @@
 const std = @import("std");
 
 const Token = union(enum) {
-    initalizer: void,
+    EOF: void,
     identifier: []const u8,
-    assignment: void,
 
-    // types
+    // keywords
+    initalizer: void,
+
+    // lits
+    byte: u8,
     int: i64,
     float: f64,
+    string: []const u8,
+    boolean: bool,
+
+    // type id
+    byte_id: void,
     integer32_id: void,
     float32_id: void,
     integer64_id: void,
     float64_id: void,
+    bool_id: void,
+    string_id: void,
 
     // ops
     add: void,
     sub: void,
     mul: void,
     div: void,
+    modulo: void,
+
+    // assignment and compound
+    eql: void,
+    add_eql: void,
+    sub_eql: void,
+    mul_eql: void,
+    div_eql: void,
+    modulo_eql: void,
     increment: void,
     decrement: void,
 
-    comparison: void,
+    // comparison ops
+    eql_eql: void,
+    not: void,
+    not_eql: void,
+    greater: void,
+    less: void,
+    greater_eql: void,
+    less_eql: void,
 
+    // punc
     colon: void,
     semicolon: void,
+    comma: void,
+    dot: void,
+    at: void,
+    question: void,
 
-    // misc
-    EOF: void,
+    // brackets
+    paren_o: void,
+    paren_c: void,
+    sq_brace_o: void,
+    sq_brace_c: void,
+    cu_brace_o: void,
+    cu_brace_c: void,
 };
 
 const LexerError = error{
@@ -38,6 +74,9 @@ const LexerError = error{
 const INITALIZER = "let";
 const INT_ID = "int";
 const FLOAT_ID = "float";
+const BYTE_ID = "byte";
+const STRING_ID = "str";
+const BOOL_ID = "bool";
 
 pub const Tokenizer = struct {
     src: []const u8,
@@ -75,45 +114,60 @@ pub const Tokenizer = struct {
 
         return switch (first) {
             '+' => {
-                if (self.peek(1)) |next| {
-                    if (next == '+') {
-                        self.pos += 2;
-                        try self.add_tok(.increment);
-                        return;
-                    }
+                const next = self.peek(1);
+                if (next == '+') {
+                    self.pos += 2;
+                    try self.add_tok(.increment);
+                } else if (next == '=') {
+                    self.pos += 2;
+                    try self.add_tok(.add_eql);
+                } else {
+                    self.pos += 1;
+                    try self.add_tok(.add);
                 }
-                self.pos += 1;
-                try self.add_tok(.add);
             },
             '-' => {
-                if (self.peek(1)) |next| {
-                    if (next == '-') {
-                        self.pos += 2;
-                        try self.add_tok(.decrement);
-                        return;
-                    }
+                const next = self.peek(1);
+                if (next == '-') {
+                    self.pos += 2;
+                    try self.add_tok(.decrement);
+                } else if (next == '=') {
+                    self.pos += 2;
+                    try self.add_tok(.sub_eql);
+                } else {
+                    self.pos += 1;
+                    try self.add_tok(.sub);
                 }
-                self.pos += 1;
-                try self.add_tok(.sub);
             },
             '*' => {
-                self.pos += 1;
-                try self.add_tok(.mul);
+                const next = self.peek(1);
+                if (next == '=') {
+                    self.pos += 2;
+                    try self.add_tok(.mul_eql);
+                } else {
+                    self.pos += 1;
+                    try self.add_tok(.mul);
+                }
             },
             '/' => {
-                self.pos += 1;
-                try self.add_tok(.div);
+                const next = self.peek(1);
+                if (next == '=') {
+                    self.pos += 2;
+                    try self.add_tok(.div_eql);
+                } else {
+                    self.pos += 1;
+                    try self.add_tok(.div);
+                }
             },
             '=' => {
-                if (self.peek(1)) |next| {
-                    if (next == '=') {
-                        self.pos += 2;
-                        try self.add_tok(.comparison);
-                        return;
-                    }
+                const next = self.peek(1);
+                if (next == '=') {
+                    self.pos += 2;
+                    try self.add_tok(.eql_eql);
+                } else {
+                    self.pos += 1;
+                    try self.add_tok(.eql);
                 }
-                self.pos += 1;
-                try self.add_tok(.assignment);
             },
             ':' => {
                 self.pos += 1;
@@ -122,6 +176,86 @@ pub const Tokenizer = struct {
             ';' => {
                 self.pos += 1;
                 try self.add_tok(.semicolon);
+            },
+            '[' => {
+                self.pos += 1;
+                try self.add_tok(.sq_brace_o);
+            },
+            ']' => {
+                self.pos += 1;
+                try self.add_tok(.sq_brace_c);
+            },
+            '{' => {
+                self.pos += 1;
+                try self.add_tok(.cu_brace_o);
+            },
+            '}' => {
+                self.pos += 1;
+                try self.add_tok(.cu_brace_c);
+            },
+            '(' => {
+                self.pos += 1;
+                try self.add_tok(.paren_o);
+            },
+            ')' => {
+                self.pos += 1;
+                try self.add_tok(.paren_c);
+            },
+            '@' => {
+                self.pos += 1;
+                try self.add_tok(.at);
+            },
+            '.' => {
+                self.pos += 1;
+                try self.add_tok(.dot);
+            },
+            '?' => {
+                self.pos += 1;
+                try self.add_tok(.question);
+            },
+            ',' => {
+                self.pos += 1;
+                try self.add_tok(.comma);
+            },
+            '!' => {
+                const next = self.peek(1);
+                if (next == '=') {
+                    self.pos += 2;
+                    try self.add_tok(.not_eql);
+                } else {
+                    self.pos += 1;
+                    try self.add_tok(.not);
+                }
+            },
+            '>' => {
+                const next = self.peek(1);
+                if (next == '=') {
+                    self.pos += 2;
+                    try self.add_tok(.greater_eql);
+                } else {
+                    self.pos += 1;
+                    try self.add_tok(.greater);
+                }
+            },
+            '<' => {
+                const next = self.peek(1);
+                if (next == '=') {
+                    self.pos += 2;
+                    try self.add_tok(.less_eql);
+                } else {
+                    self.pos += 1;
+                    try self.add_tok(.less);
+                }
+            },
+            '%' => {
+                const next = self.peek(1);
+                if (next == '=') {
+                    self.pos += 2;
+                    try self.add_tok(.modulo_eql);
+                } else {
+                    self.pos += 1;
+                    try self.add_tok(.modulo);
+                }
             },
             else => {
                 try self.lex_id();
@@ -140,12 +274,33 @@ pub const Tokenizer = struct {
             } else {
                 try self.add_tok(.{ .int = try std.fmt.parseInt(i64, try buff.toOwnedSlice(self.allocator), 10) });
             }
-        } else if ((try self.read_num_id(&buff)) != null) {} else {
+        } else if (std.mem.startsWith(u8, self.src[self.pos..], "true") and
+            !std.ascii.isAlphanumeric(self.src[self.pos + 4]))
+        {
+            try self.add_tok(.{ .boolean = true });
+            self.pos += 4;
+        } else if (std.mem.startsWith(u8, self.src[self.pos..], "false") and
+            !std.ascii.isAlphanumeric(self.src[self.pos + 5]))
+        {
+            try self.add_tok(.{ .boolean = false });
+            self.pos += 5;
+        } else if (self.src[self.pos] == '\"') {
+            try self.read_str(&buff);
+            try self.add_tok(.{ .string = try buff.toOwnedSlice(self.allocator) });
+        } else if (self.src[self.pos] == '\'') {
+            try self.read_str(&buff);
+            if (buff.items.len > 1) {
+                // should not be allowed should check in parser prob.
+                try self.add_tok(.{ .string = try buff.toOwnedSlice(self.allocator) });
+            } else {
+                try self.add_tok(.{ .byte = buff.items[0] });
+            }
+        } else if ((try self.read_type_id(&buff)) != null) {} else {
             try self.add_tok(.{ .identifier = try buff.toOwnedSlice(self.allocator) });
         }
     }
 
-    inline fn read_num_id(
+    inline fn read_type_id(
         self: *Tokenizer,
         buff: *std.ArrayList(u8),
     ) !?void {
@@ -158,6 +313,15 @@ pub const Tokenizer = struct {
         } else if (std.mem.startsWith(u8, buff.items, FLOAT_ID)) {
             start = FLOAT_ID.len;
             is_float = true;
+        } else if (std.mem.startsWith(u8, buff.items, BYTE_ID)) {
+            try self.add_tok(.byte_id);
+            return;
+        } else if (std.mem.startsWith(u8, buff.items, STRING_ID)) {
+            try self.add_tok(.string_id);
+            return;
+        } else if (std.mem.startsWith(u8, buff.items, BOOL_ID)) {
+            try self.add_tok(.bool_id);
+            return;
         } else {
             return null;
         }
@@ -186,6 +350,18 @@ pub const Tokenizer = struct {
         }
 
         return is_float;
+    }
+
+    // assumes current is "
+    // works with single and double even when strings should only be in ""
+    // but will be used for chars and will be validated in parser.
+    inline fn read_str(self: *Tokenizer, buff: *std.ArrayList(u8)) !void {
+        self.pos += 1;
+        while (self.src[self.pos] != '\"' and self.src[self.pos] != '\'') {
+            try buff.append(self.allocator, self.src[self.pos]);
+            self.pos += 1;
+        }
+        self.pos += 1;
     }
 
     inline fn read_lex_id(self: *Tokenizer, id: []const u8, tok: Token) !void {
