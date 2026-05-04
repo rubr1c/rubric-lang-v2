@@ -184,9 +184,30 @@ pub const Lexer = struct {
         }
     }
 
+    pub inline fn processEscapeSequence(self: *Lexer) !u8 {
+        if (self.ended()) return LexerError.Expected;
+        
+        const escaped_char = self.advance();
+        return switch (escaped_char) {
+            'n' => '\n',
+            'r' => '\r',
+            't' => '\t',
+            '\\' => '\\',
+            '"' => '\"',
+            '\'' => '\'',
+            else => LexerError.Expected,
+        };
+    }
+
     pub inline fn scanString(self: *Lexer, buff: *std.ArrayList(u8)) !Token {
         while (!self.ended() and self.currentChar() != '\"') {
-            try buff.append(self.allocator, self.advance());
+            if (self.currentChar() == '\\') {
+                _ = self.advance();
+                const actual_byte = try self.processEscapeSequence();
+                try buff.append(self.allocator, actual_byte);
+            } else {
+                try buff.append(self.allocator, self.advance());
+            }
         }
         if (!self.matchNext('\"')) return LexerError.Expected;
         return .{ .string = try buff.toOwnedSlice(self.allocator) };
@@ -194,7 +215,13 @@ pub const Lexer = struct {
 
     pub inline fn scanChar(self: *Lexer) !Token {
         if (self.ended()) return LexerError.Expected;
-        const char = self.advance();
+        
+        var char = self.advance();
+        
+        if (char == '\\') {
+            char = try self.processEscapeSequence();
+        }
+        
         if (!self.matchNext('\'')) {
             return LexerError.Expected;
         }
@@ -513,16 +540,16 @@ test "Lexer: Strings and Characters" {
 
     var lex = Lexer{
         .allocator = arena.allocator(),
-        .src = "\"hello\" 'c'",
+        .src = "\"hello\\nworld\" '\\t'",
     };
 
     try lex.next();
     try testing.expectEqual(TokenTag.string, std.meta.activeTag(lex.tok));
-    try testing.expectEqualStrings("hello", lex.tok.string);
+    try testing.expectEqualStrings("hello\nworld", lex.tok.string);
 
     try lex.next();
     try testing.expectEqual(TokenTag.byte, std.meta.activeTag(lex.tok));
-    try testing.expectEqual(@as(u8, 'c'), lex.tok.byte);
+    try testing.expectEqual(@as(u8, '\t'), lex.tok.byte);
 }
 
 test "Lexer: Operators" {
@@ -577,6 +604,14 @@ test "Lexer: Error Invalid Character" {
     var lex = Lexer{
         .allocator = testing.allocator,
         .src = "'ab'",
+    };
+    try testing.expectError(LexerError.Expected, lex.next());
+}
+
+test "Lexer: Error Invalid Escape" {
+    var lex = Lexer{
+        .allocator = testing.allocator,
+        .src = "'\\x'",
     };
     try testing.expectError(LexerError.Expected, lex.next());
 }
