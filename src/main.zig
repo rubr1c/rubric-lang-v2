@@ -7,11 +7,11 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    var tokenizer: lexer.Tokenizer = try .init(
-        allocator, 
-        "let c_char:byte='c';"
-    );
-    try tokenizer.build();
+    var tokenizer: lexer.Tokenizer = .{ .allocator = allocator, .src = "let c_char:byte='c';" };
 
-    std.debug.print("{any}\n", .{tokenizer.tokens.items});
+    try tokenizer.next();
+    while (tokenizer.tok != .EOF) {
+        std.debug.print("{any} ", .{tokenizer.tok});
+        try tokenizer.next();
+    }
 }
