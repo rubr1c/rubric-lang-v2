@@ -106,7 +106,7 @@ const BYTE_ID = "byte";
 const STRING_ID = "str";
 const BOOL_ID = "bool";
 
-pub const Tokenizer = struct {
+pub const Lexer = struct {
     src: []const u8,
     pos: usize = 0,
     allocator: Allocator,
@@ -114,42 +114,42 @@ pub const Tokenizer = struct {
     line: usize = 0,
     col: usize = 0,
 
-    pub inline fn ended(self: *const Tokenizer) bool {
+    pub inline fn ended(self: *const Lexer) bool {
         return self.pos >= self.src.len;
     }
 
-    pub inline fn willEnd(self: *const Tokenizer, n: usize) bool {
+    pub inline fn willEnd(self: *const Lexer, n: usize) bool {
         return (self.pos + n) >= self.src.len;
     }
 
-    pub inline fn currentChar(self: *const Tokenizer) u8 {
+    pub inline fn currentChar(self: *const Lexer) u8 {
         return self.src[self.pos];
     }
 
-    pub inline fn peekChar(self: *const Tokenizer) ?u8 {
+    pub inline fn peekChar(self: *const Lexer) ?u8 {
         if (self.willEnd(1)) return null;
         return self.src[self.pos + 1];
     }
 
-    pub inline fn peekNChars(self: *const Tokenizer, n: usize) ?u8 {
+    pub inline fn peekNChars(self: *const Lexer, n: usize) ?u8 {
         if (self.willEnd(n)) return null;
         return self.src[self.pos + n];
     }
 
-    pub inline fn advance(self: *Tokenizer) u8 {
+    pub inline fn advance(self: *Lexer) u8 {
         const char = self.currentChar();
         self.pos += 1;
         return char;
     }
 
-    pub inline fn matchNext(self: *Tokenizer, expected: u8) bool {
+    pub inline fn matchNext(self: *Lexer, expected: u8) bool {
         if (self.ended() or self.currentChar() != expected) return false;
 
         _ = self.advance();
         return true;
     }
 
-    pub inline fn skipWhitespace(self: *Tokenizer) void {
+    pub inline fn skipWhitespace(self: *Lexer) void {
         if (self.ended()) return;
 
         while (!self.ended() and std.ascii.isWhitespace(self.src[self.pos])) {
@@ -157,7 +157,7 @@ pub const Tokenizer = struct {
         }
     }
 
-    pub inline fn scanNumber(self: *Tokenizer, buff: *std.ArrayList(u8)) !Token {
+    pub inline fn scanNumber(self: *Lexer, buff: *std.ArrayList(u8)) !Token {
         var found_point = false;
         while (!self.ended() and (std.ascii.isDigit(self.currentChar()) or self.currentChar() == '.')) {
             const is_point = self.currentChar() == '.';
@@ -172,7 +172,7 @@ pub const Tokenizer = struct {
         }
     }
 
-    pub inline fn scanString(self: *Tokenizer, buff: *std.ArrayList(u8)) !Token {
+    pub inline fn scanString(self: *Lexer, buff: *std.ArrayList(u8)) !Token {
         while (!self.ended() and self.currentChar() != '\"') {
             try buff.append(self.allocator, self.advance());
         }
@@ -180,7 +180,7 @@ pub const Tokenizer = struct {
         return .{ .string = try buff.toOwnedSlice(self.allocator) };
     }
 
-    pub inline fn scanChar(self: *Tokenizer) !Token {
+    pub inline fn scanChar(self: *Lexer) !Token {
         if (self.ended()) return LexerError.Expected;
         const char = self.advance();
         if (!self.matchNext('\'')) {
@@ -219,7 +219,7 @@ pub const Tokenizer = struct {
         }
     }
 
-    pub inline fn readIdentifier(self: *Tokenizer, buff: *std.ArrayList(u8)) !void {
+    pub inline fn readIdentifier(self: *Lexer, buff: *std.ArrayList(u8)) !void {
         while (!self.ended() and (std.ascii.isAlphanumeric(self.currentChar()) or
             self.currentChar() == '_'))
         {
@@ -227,7 +227,7 @@ pub const Tokenizer = struct {
         }
     }
 
-    pub inline fn scanIdentifier(self: *Tokenizer, buff: *std.ArrayList(u8)) !Token {
+    pub inline fn scanIdentifier(self: *Lexer, buff: *std.ArrayList(u8)) !Token {
         try self.readIdentifier(buff);
 
         if (std.mem.eql(u8, buff.items, INITALIZER)) {
@@ -252,7 +252,7 @@ pub const Tokenizer = struct {
             return .{ .boolean = true };
         } else if (std.mem.eql(u8, buff.items, "false")) {
             return .{ .boolean = false };
-        } else if (Tokenizer.getType(buff.items)) |tok| {
+        } else if (Lexer.getType(buff.items)) |tok| {
             return tok;
         } else {
             return .{ .identifier = try buff.toOwnedSlice(self.allocator) };
@@ -260,7 +260,7 @@ pub const Tokenizer = struct {
     }
 
     //TODO: line num and col
-    pub inline fn next(self: *Tokenizer) !void {
+    pub inline fn next(self: *Lexer) !void {
         self.skipWhitespace();
 
         if (self.ended()) {
@@ -399,8 +399,9 @@ pub const Tokenizer = struct {
                 self.tok = .bitwise_not;
             },
             else => {
-                var buff =
+                var buff = 
                     try std.ArrayList(u8).initCapacity(self.allocator, 256);
+                defer buff.deinit(self.allocator);
 
                 if (std.ascii.isDigit(current)) {
                     try buff.append(self.allocator, current);
@@ -413,9 +414,157 @@ pub const Tokenizer = struct {
                     try buff.append(self.allocator, current);
                     self.tok = try self.scanIdentifier(&buff);
                 }
-
-                buff.clearAndFree(self.allocator);
             },
         }
     }
 };
+
+// --- Tests ---
+const testing = std.testing;
+const TokenTag = std.meta.Tag(Token);
+
+fn expectTokenTags(src: []const u8, expected: []const TokenTag) !void {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    var lex = Lexer{
+        .allocator = arena.allocator(),
+        .src = src,
+    };
+
+    for (expected) |expected_tag| {
+        try lex.next();
+        try testing.expectEqual(expected_tag, std.meta.activeTag(lex.tok));
+    }
+    
+    // Ensure the next token is EOF
+    try lex.next();
+    try testing.expectEqual(TokenTag.EOF, std.meta.activeTag(lex.tok));
+}
+
+test "Lexer: Keywords and Identifiers" {
+    const src = "let const if else while for ret fn struct my_var";
+    const expected = [_]TokenTag{
+        .initalizer,
+        .const_initalizer,
+        .keyword_if,
+        .keyword_else,
+        .keyword_while,
+        .keyword_for,
+        .keyword_return,
+        .keyword_fn,
+        .keyword_struct,
+        .identifier,
+    };
+    try expectTokenTags(src, &expected);
+}
+
+test "Lexer: Types" {
+    const src = "byte str bool int32 int64 float32 float64";
+    const expected = [_]TokenTag{
+        .byte_id,
+        .string_id,
+        .bool_id,
+        .integer32_id,
+        .integer64_id,
+        .float32_id,
+        .float64_id,
+    };
+    try expectTokenTags(src, &expected);
+}
+
+test "Lexer: Numbers (Integers & Floats)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    var lex = Lexer{
+        .allocator = arena.allocator(),
+        .src = "42 3.14 0",
+    };
+
+    try lex.next();
+    try testing.expectEqual(TokenTag.int, std.meta.activeTag(lex.tok));
+    try testing.expectEqual(@as(i64, 42), lex.tok.int);
+
+    try lex.next();
+    try testing.expectEqual(TokenTag.float, std.meta.activeTag(lex.tok));
+    try testing.expectEqual(@as(f64, 3.14), lex.tok.float);
+
+    try lex.next();
+    try testing.expectEqual(TokenTag.int, std.meta.activeTag(lex.tok));
+    try testing.expectEqual(@as(i64, 0), lex.tok.int);
+}
+
+test "Lexer: Strings and Characters" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    var lex = Lexer{
+        .allocator = arena.allocator(),
+        .src = "\"hello\" 'c'",
+    };
+
+    try lex.next();
+    try testing.expectEqual(TokenTag.string, std.meta.activeTag(lex.tok));
+    try testing.expectEqualStrings("hello", lex.tok.string);
+
+    try lex.next();
+    try testing.expectEqual(TokenTag.byte, std.meta.activeTag(lex.tok));
+    try testing.expectEqual(@as(u8, 'c'), lex.tok.byte);
+}
+
+test "Lexer: Operators" {
+    const src = "+ += - -= * *= / /= % %= == != > >= < <= << >> & && | || ^ ~";
+    const expected = [_]TokenTag{
+        .add, .add_eql, 
+        .sub, .sub_eql, 
+        .mul, .mul_eql, 
+        .div, .div_eql, 
+        .modulo, .modulo_eql, 
+        .eql_eql, .not_eql, 
+        .greater, .greater_eql, 
+        .less, .less_eql, 
+        .shift_left, .shift_right, 
+        .bitwise_and, ._and, 
+        .bitwise_or, ._or, 
+        .bitwise_xor, .bitwise_not,
+    };
+    try expectTokenTags(src, &expected);
+}
+
+test "Lexer: Punctuation" {
+    const src = "{ } [ ] ( ) : ; , . = ! ? @";
+    const expected = [_]TokenTag{
+        .cu_brace_o, .cu_brace_c, 
+        .sq_brace_o, .sq_brace_c, 
+        .paren_o, .paren_c, 
+        .colon, .semicolon, 
+        .comma, .dot, 
+        .eql, .not, .question, .at,
+    };
+    try expectTokenTags(src, &expected);
+}
+
+test "Lexer: Error InvalidNum" {
+    var lex = Lexer{
+        .allocator = testing.allocator,
+        .src = "1.2.3",
+    };
+    try testing.expectError(LexerError.InvalidNum, lex.next());
+}
+
+test "Lexer: Error Unclosed String" {
+    var lex = Lexer{
+        .allocator = testing.allocator,
+        .src = "\"hello",
+    };
+    try testing.expectError(LexerError.Expected, lex.next());
+}
+
+test "Lexer: Error Invalid Character" {
+    var lex = Lexer{
+        .allocator = testing.allocator,
+        .src = "'ab'",
+    };
+    try testing.expectError(LexerError.Expected, lex.next());
+}
