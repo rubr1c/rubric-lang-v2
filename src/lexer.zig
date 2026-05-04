@@ -149,11 +149,23 @@ pub const Lexer = struct {
         return true;
     }
 
-    pub inline fn skipWhitespace(self: *Lexer) void {
-        if (self.ended()) return;
+    pub inline fn skipComment(self: *Lexer) bool {
+        if (self.currentChar() == '/' and self.peekChar() == '/') {
+            while (!self.ended() and self.advance() != '\n') { }
+            return true;
+        }
+        return false;
+    }
 
-        while (!self.ended() and std.ascii.isWhitespace(self.src[self.pos])) {
-            self.pos += 1;
+    pub inline fn skipWhitespace(self: *Lexer) void {
+        while (!self.ended()) {
+
+            if (std.ascii.isWhitespace(self.src[self.pos])) {
+                self.pos += 1;
+                continue;
+            } 
+
+            if (!self.skipComment()) { break; }
         }
     }
 
@@ -567,4 +579,21 @@ test "Lexer: Error Invalid Character" {
         .src = "'ab'",
     };
     try testing.expectError(LexerError.Expected, lex.next());
+}
+
+test "Lexer: Single Line Comments" {
+    const src = 
+        \\// This is a comment at the start
+        \\let x = 10; // This is a comment at the end of a line
+        \\// This is a comment in the middle
+        \\const y = 20;
+        \\// This comment is at the very end of the file
+    ;
+    
+    const expected = [_]TokenTag{
+        .initalizer, .identifier, .eql, .int, .semicolon,
+        .const_initalizer, .identifier, .eql, .int, .semicolon,
+    };
+    
+    try expectTokenTags(src, &expected);
 }
