@@ -106,7 +106,6 @@ const BYTE_ID = "byte";
 const STRING_ID = "str";
 const BOOL_ID = "bool";
 
-
 pub const Lexer = struct {
     src: []const u8,
     pos: usize = 0,
@@ -156,17 +155,16 @@ pub const Lexer = struct {
         return true;
     }
 
-    pub inline fn skipComment(self: *Lexer) bool {
+    pub fn skipComment(self: *Lexer) bool {
         if (self.currentChar() == '/' and self.peekChar() == '/') {
-            while (!self.ended() and self.advance() != '\n') { }
+            while (!self.ended() and self.advance() != '\n') {}
             return true;
         }
         return false;
     }
 
-    pub inline fn skipWhitespace(self: *Lexer) void {
+    pub fn skipWhitespace(self: *Lexer) void {
         while (!self.ended()) {
-
             if (std.ascii.isWhitespace(self.src[self.pos])) {
                 const char = self.src[self.pos];
                 self.pos += 1;
@@ -176,25 +174,23 @@ pub const Lexer = struct {
                     self.col = 0;
                 }
                 continue;
-            } 
+            }
 
-            if (!self.skipComment()) { break; }
+            if (!self.skipComment()) {
+                break;
+            }
         }
     }
 
-    pub inline fn expect(self: *Lexer, expected: u8) !void {
+    pub fn expect(self: *Lexer, expected: u8) !void {
         if (self.match(expected)) return;
 
         const found_char = if (self.ended()) ' ' else self.currentChar();
-        self.err_msg = try std.fmt.allocPrint(
-            self.allocator,
-            "{d}:{d}: Expected '{c}' found '{c}'",
-            .{ self.line, self.col, expected, found_char }
-        );
+        self.err_msg = try std.fmt.allocPrint(self.allocator, "{d}:{d}: Expected '{c}' found '{c}'", .{ self.line, self.col, expected, found_char });
         return LexerError.Expected;
     }
 
-    pub inline fn scanNumber(self: *Lexer, buff: *std.ArrayList(u8)) !Token {
+    pub fn scanNumber(self: *Lexer, buff: *std.ArrayList(u8)) !Token {
         var found_point = false;
         while (!self.ended() and (std.ascii.isDigit(self.currentChar()) or self.currentChar() == '.')) {
             const is_point = self.currentChar() == '.';
@@ -209,9 +205,9 @@ pub const Lexer = struct {
         }
     }
 
-    pub inline fn processEscapeSequence(self: *Lexer) !u8 {
+    pub fn processEscapeSequence(self: *Lexer) !u8 {
         if (self.ended()) return LexerError.Expected;
-        
+
         const escaped_char = self.advance();
         return switch (escaped_char) {
             'n' => '\n',
@@ -224,7 +220,7 @@ pub const Lexer = struct {
         };
     }
 
-    pub inline fn scanString(self: *Lexer, buff: *std.ArrayList(u8)) !Token {
+    pub fn scanString(self: *Lexer, buff: *std.ArrayList(u8)) !Token {
         while (!self.ended() and self.currentChar() != '\"') {
             if (self.currentChar() == '\\') {
                 _ = self.advance();
@@ -238,20 +234,20 @@ pub const Lexer = struct {
         return .{ .string = try buff.toOwnedSlice(self.allocator) };
     }
 
-    pub inline fn scanChar(self: *Lexer) !Token {
+    pub fn scanChar(self: *Lexer) !Token {
         if (self.ended()) return LexerError.Expected;
-        
+
         var char = self.advance();
-        
+
         if (char == '\\') {
             char = try self.processEscapeSequence();
         }
-        
+
         try self.expect('\'');
         return .{ .byte = char };
     }
 
-    pub inline fn getType(id: []const u8) ?Token {
+    pub fn getType(id: []const u8) ?Token {
         var size_idx: usize = 0;
         var is_float = false;
 
@@ -281,7 +277,7 @@ pub const Lexer = struct {
         }
     }
 
-    pub inline fn readIdentifier(self: *Lexer, buff: *std.ArrayList(u8)) !void {
+    pub fn readIdentifier(self: *Lexer, buff: *std.ArrayList(u8)) !void {
         while (!self.ended() and (std.ascii.isAlphanumeric(self.currentChar()) or
             self.currentChar() == '_'))
         {
@@ -289,7 +285,7 @@ pub const Lexer = struct {
         }
     }
 
-    pub inline fn scanIdentifier(self: *Lexer, buff: *std.ArrayList(u8)) !Token {
+    pub fn scanIdentifier(self: *Lexer, buff: *std.ArrayList(u8)) !Token {
         try self.readIdentifier(buff);
 
         if (std.mem.eql(u8, buff.items, INITALIZER)) {
@@ -322,7 +318,7 @@ pub const Lexer = struct {
     }
 
     //TODO: line num and col
-    pub inline fn next(self: *Lexer) !void {
+    pub fn next(self: *Lexer) !void {
         self.skipWhitespace();
 
         if (self.ended()) {
@@ -461,7 +457,7 @@ pub const Lexer = struct {
                 self.tok = .bitwise_not;
             },
             else => {
-                var buff = 
+                var buff =
                     try std.ArrayList(u8).initCapacity(self.allocator, 256);
                 defer buff.deinit(self.allocator);
 
@@ -498,7 +494,7 @@ fn expectTokenTags(src: []const u8, expected: []const TokenTag) !void {
         try lex.next();
         try testing.expectEqual(expected_tag, std.meta.activeTag(lex.tok));
     }
-    
+
     // Ensure the next token is EOF
     try lex.next();
     try testing.expectEqual(TokenTag.EOF, std.meta.activeTag(lex.tok));
@@ -578,17 +574,17 @@ test "Lexer: Strings and Characters" {
 test "Lexer: Operators" {
     const src = "+ += - -= * *= / /= % %= == != > >= < <= << >> & && | || ^ ~";
     const expected = [_]TokenTag{
-        .add, .add_eql, 
-        .sub, .sub_eql, 
-        .mul, .mul_eql, 
-        .div, .div_eql, 
-        .modulo, .modulo_eql, 
-        .eql_eql, .not_eql, 
-        .greater, .greater_eql, 
-        .less, .less_eql, 
-        .shift_left, .shift_right, 
-        .bitwise_and, ._and, 
-        .bitwise_or, ._or, 
+        .add,         .add_eql,
+        .sub,         .sub_eql,
+        .mul,         .mul_eql,
+        .div,         .div_eql,
+        .modulo,      .modulo_eql,
+        .eql_eql,     .not_eql,
+        .greater,     .greater_eql,
+        .less,        .less_eql,
+        .shift_left,  .shift_right,
+        .bitwise_and, ._and,
+        .bitwise_or,  ._or,
         .bitwise_xor, .bitwise_not,
     };
     try expectTokenTags(src, &expected);
@@ -597,12 +593,13 @@ test "Lexer: Operators" {
 test "Lexer: Punctuation" {
     const src = "{ } [ ] ( ) : ; , . = ! ? @";
     const expected = [_]TokenTag{
-        .cu_brace_o, .cu_brace_c, 
-        .sq_brace_o, .sq_brace_c, 
-        .paren_o, .paren_c, 
-        .colon, .semicolon, 
-        .comma, .dot, 
-        .eql, .not, .question, .at,
+        .cu_brace_o, .cu_brace_c,
+        .sq_brace_o, .sq_brace_c,
+        .paren_o,    .paren_c,
+        .colon,      .semicolon,
+        .comma,      .dot,
+        .eql,        .not,
+        .question,   .at,
     };
     try expectTokenTags(src, &expected);
 }
@@ -646,17 +643,16 @@ test "Lexer: Error Invalid Escape" {
 }
 
 test "Lexer: Line and Column Tracking" {
-    @setEvalBranchQuota(10000);
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
 
     var lex = Lexer{
         .allocator = arena.allocator(),
-        .src = 
-            \\let a = 1;
-            \\  let b = 2;
-            \\
-            \\let c = 3;
+        .src =
+        \\let a = 1;
+        \\  let b = 2;
+        \\
+        \\let c = 3;
         ,
     };
 
@@ -711,28 +707,28 @@ test "Lexer: Error Message Formatting" {
     try lex.next(); // let
     try lex.next(); // c
     try lex.next(); // =
-    
+
     // Expect error on `'a;` missing closing quote
     const err = lex.next();
     try testing.expectError(LexerError.Expected, err);
-    
+
     try testing.expect(lex.err_msg != null);
     try testing.expectEqualStrings("0:10: Expected ''' found ';'", lex.err_msg.?);
 }
 
 test "Lexer: Single Line Comments" {
-    const src = 
+    const src =
         \\// This is a comment at the start
         \\let x = 10; // This is a comment at the end of a line
         \\// This is a comment in the middle
         \\const y = 20;
         \\// This comment is at the very end of the file
     ;
-    
+
     const expected = [_]TokenTag{
-        .initalizer, .identifier, .eql, .int, .semicolon,
+        .initalizer,       .identifier, .eql, .int, .semicolon,
         .const_initalizer, .identifier, .eql, .int, .semicolon,
     };
-    
+
     try expectTokenTags(src, &expected);
 }

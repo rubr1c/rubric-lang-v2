@@ -7,10 +7,7 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    var lexer_instance: lexer.Lexer = .{ 
-        .allocator = allocator, 
-        .src = "let c_char:byte='c';" 
-    };
+    var lexer_instance: lexer.Lexer = .{ .allocator = allocator, .src = "let c_char:byte='c';" };
 
     while (true) {
         lexer_instance.next() catch |err| {
