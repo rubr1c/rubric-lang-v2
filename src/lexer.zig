@@ -106,6 +106,7 @@ const BYTE_ID = "byte";
 const STRING_ID = "str";
 const BOOL_ID = "bool";
 
+
 pub const Lexer = struct {
     src: []const u8,
     pos: usize = 0,
@@ -113,6 +114,7 @@ pub const Lexer = struct {
     tok: Token = undefined,
     line: usize = 0,
     col: usize = 0,
+    err_msg: ?[]const u8 = null,
 
     pub inline fn ended(self: *const Lexer) bool {
         return self.pos >= self.src.len;
@@ -139,10 +141,15 @@ pub const Lexer = struct {
     pub inline fn advance(self: *Lexer) u8 {
         const char = self.currentChar();
         self.pos += 1;
+        self.col += 1;
+        if (char == '\n') {
+            self.line += 1;
+            self.col = 0;
+        }
         return char;
     }
 
-    pub inline fn matchNext(self: *Lexer, expected: u8) bool {
+    pub inline fn match(self: *Lexer, expected: u8) bool {
         if (self.ended() or self.currentChar() != expected) return false;
 
         _ = self.advance();
@@ -161,12 +168,30 @@ pub const Lexer = struct {
         while (!self.ended()) {
 
             if (std.ascii.isWhitespace(self.src[self.pos])) {
+                const char = self.src[self.pos];
                 self.pos += 1;
+                self.col += 1;
+                if (char == '\n') {
+                    self.line += 1;
+                    self.col = 0;
+                }
                 continue;
             } 
 
             if (!self.skipComment()) { break; }
         }
+    }
+
+    pub inline fn expect(self: *Lexer, expected: u8) !void {
+        if (self.match(expected)) return;
+
+        const found_char = if (self.ended()) ' ' else self.currentChar();
+        self.err_msg = try std.fmt.allocPrint(
+            self.allocator,
+            "{d}:{d}: Expected '{c}' found '{c}'",
+            .{ self.line, self.col, expected, found_char }
+        );
+        return LexerError.Expected;
     }
 
     pub inline fn scanNumber(self: *Lexer, buff: *std.ArrayList(u8)) !Token {
@@ -209,7 +234,7 @@ pub const Lexer = struct {
                 try buff.append(self.allocator, self.advance());
             }
         }
-        if (!self.matchNext('\"')) return LexerError.Expected;
+        try self.expect('\"');
         return .{ .string = try buff.toOwnedSlice(self.allocator) };
     }
 
@@ -222,9 +247,7 @@ pub const Lexer = struct {
             char = try self.processEscapeSequence();
         }
         
-        if (!self.matchNext('\'')) {
-            return LexerError.Expected;
-        }
+        try self.expect('\'');
         return .{ .byte = char };
     }
 
@@ -311,39 +334,39 @@ pub const Lexer = struct {
 
         switch (current) {
             '+' => {
-                if (self.matchNext('+')) {
+                if (self.match('+')) {
                     self.tok = .increment;
-                } else if (self.matchNext('=')) {
+                } else if (self.match('=')) {
                     self.tok = .add_eql;
                 } else {
                     self.tok = .add;
                 }
             },
             '-' => {
-                if (self.matchNext('-')) {
+                if (self.match('-')) {
                     self.tok = .decrement;
-                } else if (self.matchNext('=')) {
+                } else if (self.match('=')) {
                     self.tok = .sub_eql;
                 } else {
                     self.tok = .sub;
                 }
             },
             '*' => {
-                if (self.matchNext('=')) {
+                if (self.match('=')) {
                     self.tok = .mul_eql;
                 } else {
                     self.tok = .mul;
                 }
             },
             '/' => {
-                if (self.matchNext('=')) {
+                if (self.match('=')) {
                     self.tok = .div_eql;
                 } else {
                     self.tok = .div;
                 }
             },
             '=' => {
-                if (self.matchNext('=')) {
+                if (self.match('=')) {
                     self.tok = .eql_eql;
                 } else {
                     self.tok = .eql;
@@ -386,46 +409,46 @@ pub const Lexer = struct {
                 self.tok = .comma;
             },
             '!' => {
-                if (self.matchNext('=')) {
+                if (self.match('=')) {
                     self.tok = .not_eql;
                 } else {
                     self.tok = .not;
                 }
             },
             '>' => {
-                if (self.matchNext('=')) {
+                if (self.match('=')) {
                     self.tok = .greater_eql;
-                } else if (self.matchNext('>')) {
+                } else if (self.match('>')) {
                     self.tok = .shift_right;
                 } else {
                     self.tok = .greater;
                 }
             },
             '<' => {
-                if (self.matchNext('=')) {
+                if (self.match('=')) {
                     self.tok = .less_eql;
-                } else if (self.matchNext('<')) {
+                } else if (self.match('<')) {
                     self.tok = .shift_left;
                 } else {
                     self.tok = .less;
                 }
             },
             '%' => {
-                if (self.matchNext('=')) {
+                if (self.match('=')) {
                     self.tok = .modulo_eql;
                 } else {
                     self.tok = .modulo;
                 }
             },
             '&' => {
-                if (self.matchNext('&')) {
+                if (self.match('&')) {
                     self.tok = ._and;
                 } else {
                     self.tok = .bitwise_and;
                 }
             },
             '|' => {
-                if (self.matchNext('|')) {
+                if (self.match('|')) {
                     self.tok = ._or;
                 } else {
                     self.tok = .bitwise_or;
@@ -593,27 +616,108 @@ test "Lexer: Error InvalidNum" {
 }
 
 test "Lexer: Error Unclosed String" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
     var lex = Lexer{
-        .allocator = testing.allocator,
+        .allocator = arena.allocator(),
         .src = "\"hello",
     };
     try testing.expectError(LexerError.Expected, lex.next());
 }
 
 test "Lexer: Error Invalid Character" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
     var lex = Lexer{
-        .allocator = testing.allocator,
+        .allocator = arena.allocator(),
         .src = "'ab'",
     };
     try testing.expectError(LexerError.Expected, lex.next());
 }
 
 test "Lexer: Error Invalid Escape" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
     var lex = Lexer{
-        .allocator = testing.allocator,
+        .allocator = arena.allocator(),
         .src = "'\\x'",
     };
     try testing.expectError(LexerError.Expected, lex.next());
+}
+
+test "Lexer: Line and Column Tracking" {
+    @setEvalBranchQuota(10000);
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    var lex = Lexer{
+        .allocator = arena.allocator(),
+        .src = 
+            \\let a = 1;
+            \\  let b = 2;
+            \\
+            \\let c = 3;
+        ,
+    };
+
+    // "let"
+    try lex.next();
+    try testing.expectEqual(@as(usize, 0), lex.line);
+    try testing.expectEqual(@as(usize, 3), lex.col);
+
+    // "a"
+    try lex.next();
+    try testing.expectEqual(@as(usize, 0), lex.line);
+    try testing.expectEqual(@as(usize, 5), lex.col);
+
+    // "="
+    try lex.next();
+    try testing.expectEqual(@as(usize, 0), lex.line);
+    try testing.expectEqual(@as(usize, 7), lex.col);
+
+    // "1"
+    try lex.next();
+    // ";"
+    try lex.next();
+    try testing.expectEqual(@as(usize, 0), lex.line);
+    try testing.expectEqual(@as(usize, 10), lex.col);
+
+    // Next line "let" (after \n and 2 spaces)
+    try lex.next();
+    try testing.expectEqual(@as(usize, 1), lex.line);
+    try testing.expectEqual(@as(usize, 5), lex.col);
+
+    // Skip to next line
+    try lex.next(); // b
+    try lex.next(); // =
+    try lex.next(); // 2
+    try lex.next(); // ;
+
+    // "let" after 2 newlines
+    try lex.next();
+    try testing.expectEqual(@as(usize, 3), lex.line);
+    try testing.expectEqual(@as(usize, 3), lex.col);
+}
+
+test "Lexer: Error Message Formatting" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    var lex = Lexer{
+        .allocator = arena.allocator(),
+        .src = "let c = 'a;",
+    };
+
+    try lex.next(); // let
+    try lex.next(); // c
+    try lex.next(); // =
+    
+    // Expect error on `'a;` missing closing quote
+    const err = lex.next();
+    try testing.expectError(LexerError.Expected, err);
+    
+    try testing.expect(lex.err_msg != null);
+    try testing.expectEqualStrings("0:10: Expected ''' found ';'", lex.err_msg.?);
 }
 
 test "Lexer: Single Line Comments" {

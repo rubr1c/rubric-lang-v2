@@ -7,11 +7,23 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    var lexer_instance: lexer.Lexer = .{ .allocator = allocator, .src = "let c_char:byte='c';" };
+    var lexer_instance: lexer.Lexer = .{ 
+        .allocator = allocator, 
+        .src = "let c_char:byte='c';" 
+    };
 
-    try lexer_instance.next();
-    while (lexer_instance.tok != .EOF) {
+    while (true) {
+        lexer_instance.next() catch |err| {
+            if (lexer_instance.err_msg) |msg| {
+                std.debug.print("\nError: {s}\n", .{msg});
+            } else {
+                std.debug.print("\nError: {}\n", .{err});
+            }
+            return;
+        };
+
+        if (lexer_instance.tok == .EOF) break;
         std.debug.print("{any} ", .{lexer_instance.tok});
-        try lexer_instance.next();
     }
+    std.debug.print("\n", .{});
 }
